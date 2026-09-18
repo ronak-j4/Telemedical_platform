@@ -1336,3 +1336,5 @@ The overall architecture is:
 The project demonstrates how a normalized Oracle database can be
 integrated with a Java Spring Boot backend and a dynamic web interface
 to create a complete database-driven hospital management application.
+
+
