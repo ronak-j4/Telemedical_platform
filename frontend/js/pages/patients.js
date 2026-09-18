@@ -1,11 +1,3 @@
-/**
- * pages/patients.js
- * -----------------------------------------------------------------------
- * Patients table + Add/Edit/Delete, all backed by /api/patients.
- * No patient data is ever hardcoded — everything rendered here comes
- * from the last successful GET /api/patients response.
- */
-
 const HMD = window.HMD || (window.HMD = {});
 HMD.pages = HMD.pages || {};
 
@@ -19,8 +11,24 @@ HMD.pages = HMD.pages || {};
   async function load() {
     setTableState('patients', 'loading');
     try {
-      const data = await HMD_API.get('/api/patients');
-      allPatients = Array.isArray(data) ? data : [];
+      const [data, phoneRows] = await Promise.all([
+        HMD_API.get('/api/patients'),
+        HMD_API.get('/api/patient-phones').catch(() => []),
+      ]);
+      const phonesByPatient = {};
+      (Array.isArray(phoneRows) ? phoneRows : []).forEach((row) => {
+        const patientId = row.patient_id ?? row.PATIENT_ID;
+        const phone = row.phone_no ?? row.PHONE_NO;
+        if (patientId != null && phone) {
+          if (!phonesByPatient[patientId]) phonesByPatient[patientId] = [];
+          phonesByPatient[patientId].push(String(phone));
+        }
+      });
+      allPatients = (Array.isArray(data) ? data : []).map((p) => ({
+        ...p,
+        id: p.patientId,
+        phone: (phonesByPatient[p.patientId] || [])[0] || '',
+      }));
       render();
     } catch (err) {
       setTableState('patients', 'error');
@@ -51,7 +59,7 @@ HMD.pages = HMD.pages || {};
         <td>${formatDate(p.dob)}</td>
         <td>${escapeHtml(p.city || '—')}${p.area ? ', ' + escapeHtml(p.area) : ''}</td>
         <td>${escapeHtml(p.pincode || '—')}</td>
-        <td>${escapeHtml(p.phone || p.phoneNumber || '—')}</td>
+        <td>${escapeHtml(p.phone || '—')}</td>
         <td class="col-actions">
           <div class="row-actions">
             <button data-edit="${p.id}" title="Edit"><i data-lucide="pencil"></i></button>
@@ -61,6 +69,7 @@ HMD.pages = HMD.pages || {};
       </tr>
     `).join('');
     setTableState('patients', 'ready');
+    if (window.lucide) lucide.createIcons();
 
     tbody.querySelectorAll('[data-edit]').forEach((btn) =>
       btn.addEventListener('click', () => openForm(allPatients.find((p) => String(p.id) === btn.dataset.edit))));
@@ -107,8 +116,7 @@ HMD.pages = HMD.pages || {};
           <input class="input-field" id="f-pincode" value="${escapeHtml(p.pincode || '')}" />
         </div>
         <div class="form-field"><label>Phone Number</label>
-          <input class="input-field" id="f-phone" value="${escapeHtml(p.phone || p.phoneNumber || '')}" />
-          <span class="hint">Only used if the backend supports it.</span>
+          <input class="input-field" id="f-phone" value="${escapeHtml(p.phone || '')}" />
         </div>
       </div>
     `;
@@ -137,6 +145,15 @@ HMD.pages = HMD.pages || {};
     return errors.length === 0;
   }
 
+  async function syncPhone(patientId, oldPhone, newPhone) {
+    if (oldPhone && oldPhone !== newPhone) {
+      await HMD_API.del(`/api/patient-phones?patientId=${encodeURIComponent(patientId)}&phoneNo=${encodeURIComponent(oldPhone)}`);
+    }
+    if (newPhone && oldPhone !== newPhone) {
+      await HMD_API.post('/api/patient-phones', { patient_id: patientId, phone_no: newPhone });
+    }
+  }
+
   function openForm(existing) {
     const isEdit = !!existing;
     HMD_MODAL.open({
@@ -156,11 +173,17 @@ HMD.pages = HMD.pages || {};
           btn.disabled = true;
           btn.textContent = 'Saving…';
           try {
+            const oldPhone = existing ? existing.phone : '';
+            let patient;
             if (isEdit) {
-              await HMD_API.put(`/api/patients/${existing.id}`, body);
+              patient = await HMD_API.put(`/api/patients/${existing.patientId}`, { ...body, phone: undefined });
+              await syncPhone(existing.patientId, oldPhone, body.phone);
               showToast('Patient updated.', 'success');
             } else {
-              await HMD_API.post('/api/patients', body);
+              patient = await HMD_API.post('/api/patients', { ...body, phone: undefined });
+              if (body.phone && patient?.patientId) {
+                await HMD_API.post('/api/patient-phones', { patient_id: patient.patientId, phone_no: body.phone });
+              }
               showToast('Patient added.', 'success');
             }
             HMD_MODAL.close();

@@ -1,10 +1,3 @@
-/**
- * pages/payments.js
- * -----------------------------------------------------------------------
- * Payments table + Add/Edit/Delete, backed by /api/payments. The
- * Consultation dropdown is populated live from /api/consultations.
- */
-
 const HMD = window.HMD || (window.HMD = {});
 HMD.pages = HMD.pages || {};
 
@@ -16,12 +9,8 @@ HMD.pages = HMD.pages || {};
   const METHOD_OPTIONS = ['COD', 'UPI', 'CARD', 'NETBANKING'];
 
   async function loadLookups() {
-    try {
-      const consultations = await HMD_API.get('/api/consultations');
-      consultationsCache = Array.isArray(consultations) ? consultations : [];
-    } catch (_) {
-      consultationsCache = [];
-    }
+    const consultations = await HMD_API.get('/api/consultations').catch(() => []);
+    consultationsCache = (Array.isArray(consultations) ? consultations : []).map((c) => ({ ...c, id: c.consultationId }));
   }
 
   function consultationLabel(c) {
@@ -33,7 +22,7 @@ HMD.pages = HMD.pages || {};
     setTableState('payments', 'loading');
     try {
       const [data] = await Promise.all([HMD_API.get('/api/payments'), loadLookups()]);
-      allPayments = Array.isArray(data) ? data : [];
+      allPayments = (Array.isArray(data) ? data : []).map((p) => ({ ...p, id: p.paymentId }));
       render();
     } catch (err) {
       setTableState('payments', 'error');
@@ -43,10 +32,10 @@ HMD.pages = HMD.pages || {};
 
   function render() {
     let rows = allPayments;
-    if (currentFilter) rows = rows.filter((p) => (p.paymentMethod || p.method) === currentFilter);
+    if (currentFilter) rows = rows.filter((p) => p.paidBy === currentFilter);
     if (currentSearch) {
-      rows = rows.filter((p) => (p.paidBy || '').toLowerCase().includes(currentSearch) ||
-        consultationLabel(findConsultation(p.consultationId ?? p.consultation?.id)).toLowerCase().includes(currentSearch));
+      rows = rows.filter((p) => p.paidBy.toLowerCase().includes(currentSearch) ||
+        consultationLabel(findConsultation(p.consultationId)).toLowerCase().includes(currentSearch));
     }
 
     const tbody = document.getElementById('paymentsTableBody');
@@ -57,14 +46,13 @@ HMD.pages = HMD.pages || {};
     }
 
     tbody.innerHTML = rows.map((p) => {
-      const consultation = findConsultation(p.consultationId ?? p.consultation?.id);
+      const consultation = findConsultation(p.consultationId);
       return `
         <tr>
           <td>#${escapeHtml(p.id)}</td>
           <td>${escapeHtml(consultationLabel(consultation))}</td>
-          <td>${formatCurrency(p.paymentAmount ?? p.amount)}</td>
-          <td>${escapeHtml(p.paidBy || '—')}</td>
-          <td><span class="badge badge-info">${escapeHtml(p.paymentMethod || p.method || '—')}</span></td>
+          <td>${formatCurrency(p.amount)}</td>
+          <td><span class="badge badge-info">${escapeHtml(p.paidBy || '—')}</span></td>
           <td class="col-actions">
             <div class="row-actions">
               <button data-edit="${p.id}" title="Edit"><i data-lucide="pencil"></i></button>
@@ -75,6 +63,7 @@ HMD.pages = HMD.pages || {};
       `;
     }).join('');
     setTableState('payments', 'ready');
+    if (window.lucide) lucide.createIcons();
 
     tbody.querySelectorAll('[data-edit]').forEach((btn) =>
       btn.addEventListener('click', () => openForm(allPayments.find((p) => String(p.id) === btn.dataset.edit))));
@@ -88,8 +77,8 @@ HMD.pages = HMD.pages || {};
   }
 
   function formFieldsHtml(p = {}) {
-    const consultationId = p.consultationId ?? p.consultation?.id ?? '';
-    const method = p.paymentMethod || p.method || '';
+    const consultationId = p.consultationId ?? '';
+    const method = p.paidBy || '';
     return `
       <div class="form-grid">
         <div class="form-field full"><label>Consultation</label>
@@ -99,15 +88,12 @@ HMD.pages = HMD.pages || {};
           </select>
           <span class="field-error">Consultation is required.</span>
         </div>
-        <div class="form-field"><label>Payment Amount</label>
-          <input type="number" min="0" step="0.01" class="input-field" id="f-paymentAmount" value="${p.paymentAmount ?? p.amount ?? ''}" required />
-          <span class="field-error">Amount is required.</span>
+        <div class="form-field"><label>Amount</label>
+          <input type="number" min="0.01" step="0.01" class="input-field" id="f-amount" value="${p.amount ?? ''}" required />
+          <span class="field-error">Amount must be greater than 0.</span>
         </div>
-        <div class="form-field"><label>Paid By</label>
-          <input class="input-field" id="f-paidBy" value="${escapeHtml(p.paidBy || '')}" />
-        </div>
-        <div class="form-field full"><label>Payment Method</label>
-          <select class="select-field" id="f-paymentMethod" required>
+        <div class="form-field"><label>Payment Method</label>
+          <select class="select-field" id="f-paidBy" required>
             <option value="">Select…</option>
             ${METHOD_OPTIONS.map((m) => `<option value="${m}" ${method === m ? 'selected' : ''}>${m}</option>`).join('')}
           </select>
@@ -120,17 +106,16 @@ HMD.pages = HMD.pages || {};
   function readForm() {
     return {
       consultationId: document.getElementById('f-consultationId').value,
-      paymentAmount: Number(document.getElementById('f-paymentAmount').value),
-      paidBy: document.getElementById('f-paidBy').value.trim(),
-      paymentMethod: document.getElementById('f-paymentMethod').value,
+      amount: Number(document.getElementById('f-amount').value),
+      paidBy: document.getElementById('f-paidBy').value,
     };
   }
 
   function validate(body) {
     const errors = [];
     if (!body.consultationId) errors.push('f-consultationId');
-    if (!body.paymentAmount && body.paymentAmount !== 0) errors.push('f-paymentAmount');
-    if (!body.paymentMethod) errors.push('f-paymentMethod');
+    if (!Number.isFinite(body.amount) || body.amount <= 0) errors.push('f-amount');
+    if (!body.paidBy) errors.push('f-paidBy');
     errors.forEach((id) => document.getElementById(id).closest('.form-field').classList.add('has-error'));
     return errors.length === 0;
   }
@@ -155,7 +140,7 @@ HMD.pages = HMD.pages || {};
           btn.textContent = 'Saving…';
           try {
             if (isEdit) {
-              await HMD_API.put(`/api/payments/${existing.id}`, body);
+              await HMD_API.put(`/api/payments/${existing.paymentId}`, body);
               showToast('Payment updated.', 'success');
             } else {
               await HMD_API.post('/api/payments', body);

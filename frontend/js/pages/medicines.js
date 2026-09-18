@@ -17,7 +17,7 @@ HMD.pages = HMD.pages || {};
     setTableState('medicines', 'loading');
     try {
       const data = await HMD_API.get('/api/medicines');
-      allMedicines = Array.isArray(data) ? data : [];
+      allMedicines = (Array.isArray(data) ? data : []).map((row) => ({ ...row, id: row.medicineId }));
       render();
     } catch (err) {
       setTableState('medicines', 'error');

@@ -1,13 +1,3 @@
-/**
- * pages/prescriptions.js
- * -----------------------------------------------------------------------
- * Prescriptions table + Add/Edit/Delete, backed by /api/prescriptions.
- * The Consultation dropdown is always populated live from
- * /api/consultations — consultation IDs are never hardcoded. Medicine
- * and Test dropdowns are likewise populated live from /api/medicines
- * and /api/tests.
- */
-
 const HMD = window.HMD || (window.HMD = {});
 HMD.pages = HMD.pages || {};
 
@@ -16,27 +6,52 @@ HMD.pages = HMD.pages || {};
   let consultationsCache = [];
   let medicinesCache = [];
   let testsCache = [];
+  let medicinesByPrescription = {};
+  let testsByPrescription = {};
   let currentSearch = '';
 
   async function loadLookups() {
-    const [consultations, medicines, tests] = await Promise.all([
+    const [consultations, medicines, tests, medicineLinks, testLinks] = await Promise.all([
       HMD_API.get('/api/consultations').catch(() => []),
       HMD_API.get('/api/medicines').catch(() => []),
       HMD_API.get('/api/tests').catch(() => []),
+      HMD_API.get('/api/prescription-medicines').catch(() => []),
+      HMD_API.get('/api/prescription-tests').catch(() => []),
     ]);
-    consultationsCache = Array.isArray(consultations) ? consultations : [];
-    medicinesCache = Array.isArray(medicines) ? medicines : [];
-    testsCache = Array.isArray(tests) ? tests : [];
+
+    consultationsCache = (Array.isArray(consultations) ? consultations : []).map((c) => ({ ...c, id: c.consultationId }));
+    medicinesCache = (Array.isArray(medicines) ? medicines : []).map((m) => ({ ...m, id: m.medicineId }));
+    testsCache = (Array.isArray(tests) ? tests : []).map((t) => ({ ...t, id: t.testId }));
+
+    medicinesByPrescription = {};
+    (Array.isArray(medicineLinks) ? medicineLinks : []).forEach((row) => {
+      const prescriptionId = row.prescription_id ?? row.PRESCRIPTION_ID;
+      const medicineId = row.medicine_id ?? row.MEDICINE_ID;
+      if (prescriptionId != null && medicineId != null) {
+        if (!medicinesByPrescription[prescriptionId]) medicinesByPrescription[prescriptionId] = [];
+        medicinesByPrescription[prescriptionId].push(String(medicineId));
+      }
+    });
+
+    testsByPrescription = {};
+    (Array.isArray(testLinks) ? testLinks : []).forEach((row) => {
+      const prescriptionId = row.prescription_id ?? row.PRESCRIPTION_ID;
+      const testId = row.test_id ?? row.TEST_ID;
+      if (prescriptionId != null && testId != null) {
+        if (!testsByPrescription[prescriptionId]) testsByPrescription[prescriptionId] = [];
+        testsByPrescription[prescriptionId].push(String(testId));
+      }
+    });
   }
 
   function consultationLabel(c) {
     return c ? `Consultation #${c.id} — ${formatDate(c.date)}` : '—';
   }
   function medicineLabel(m) {
-    return m ? (m.medicineName || m.name || `#${m.id}`) : '—';
+    return m ? (m.medicineName || `#${m.id}`) : '—';
   }
   function testLabel(t) {
-    return t ? (t.testName || t.name || `#${t.id}`) : '—';
+    return t ? (t.testName || `#${t.id}`) : '—';
   }
   function findConsultation(id) { return consultationsCache.find((c) => String(c.id) === String(id)); }
   function findMedicine(id) { return medicinesCache.find((m) => String(m.id) === String(id)); }
@@ -46,7 +61,7 @@ HMD.pages = HMD.pages || {};
     setTableState('prescriptions', 'loading');
     try {
       const [data] = await Promise.all([HMD_API.get('/api/prescriptions'), loadLookups()]);
-      allPrescriptions = Array.isArray(data) ? data : [];
+      allPrescriptions = (Array.isArray(data) ? data : []).map((p) => ({ ...p, id: p.prescriptionId }));
       render();
     } catch (err) {
       setTableState('prescriptions', 'error');
@@ -54,14 +69,33 @@ HMD.pages = HMD.pages || {};
     }
   }
 
+  function linkedMedicineIds(prescriptionId) {
+    return medicinesByPrescription[prescriptionId] || [];
+  }
+
+  function linkedTestIds(prescriptionId) {
+    return testsByPrescription[prescriptionId] || [];
+  }
+
+  function linkedMedicineNames(prescriptionId) {
+    return linkedMedicineIds(prescriptionId).map((id) => medicineLabel(findMedicine(id))).filter((x) => x !== '—');
+  }
+
+  function linkedTestNames(prescriptionId) {
+    return linkedTestIds(prescriptionId).map((id) => testLabel(findTest(id))).filter((x) => x !== '—');
+  }
+
   function render() {
     let rows = allPrescriptions;
     if (currentSearch) {
       rows = rows.filter((p) => {
-        const c = findConsultation(p.consultationId ?? p.consultation?.id);
-        const m = findMedicine(p.medicineId ?? p.medicine?.id);
-        return consultationLabel(c).toLowerCase().includes(currentSearch) ||
-          medicineLabel(m).toLowerCase().includes(currentSearch);
+        const consultation = consultationLabel(findConsultation(p.consultationId));
+        const medicines = linkedMedicineNames(p.id).join(' ');
+        const tests = linkedTestNames(p.id).join(' ');
+        return consultation.toLowerCase().includes(currentSearch) ||
+          (p.dosage || '').toLowerCase().includes(currentSearch) ||
+          medicines.toLowerCase().includes(currentSearch) ||
+          tests.toLowerCase().includes(currentSearch);
       });
     }
 
@@ -73,16 +107,17 @@ HMD.pages = HMD.pages || {};
     }
 
     tbody.innerHTML = rows.map((p) => {
-      const consultation = findConsultation(p.consultationId ?? p.consultation?.id);
-      const medicine = findMedicine(p.medicineId ?? p.medicine?.id);
-      const test = findTest(p.testId ?? p.test?.id);
+      const consultation = findConsultation(p.consultationId);
+      const medicines = linkedMedicineNames(p.id);
+      const tests = linkedTestNames(p.id);
       return `
         <tr>
           <td>#${escapeHtml(p.id)}</td>
           <td>${escapeHtml(consultationLabel(consultation))}</td>
-          <td>${escapeHtml(medicineLabel(medicine))}</td>
-          <td>${test ? escapeHtml(testLabel(test)) : '—'}</td>
-          <td>${escapeHtml(p.notes || p.instructions || '—')}</td>
+          <td>${formatDate(p.prescriptionDate)}</td>
+          <td>${escapeHtml(p.dosage || '—')}</td>
+          <td>${escapeHtml(medicines.length ? medicines.join(', ') : '—')}</td>
+          <td>${escapeHtml(tests.length ? tests.join(', ') : '—')}</td>
           <td class="col-actions">
             <div class="row-actions">
               <button data-edit="${p.id}" title="Edit"><i data-lucide="pencil"></i></button>
@@ -93,6 +128,7 @@ HMD.pages = HMD.pages || {};
       `;
     }).join('');
     setTableState('prescriptions', 'ready');
+    if (window.lucide) lucide.createIcons();
 
     tbody.querySelectorAll('[data-edit]').forEach((btn) =>
       btn.addEventListener('click', () => openForm(allPrescriptions.find((p) => String(p.id) === btn.dataset.edit))));
@@ -106,9 +142,9 @@ HMD.pages = HMD.pages || {};
   }
 
   function formFieldsHtml(p = {}) {
-    const consultationId = p.consultationId ?? p.consultation?.id ?? '';
-    const medicineId = p.medicineId ?? p.medicine?.id ?? '';
-    const testId = p.testId ?? p.test?.id ?? '';
+    const consultationId = p.consultationId ?? '';
+    const medicineIds = new Set(linkedMedicineIds(p.prescriptionId).map(String));
+    const testIds = new Set(linkedTestIds(p.prescriptionId).map(String));
     return `
       <div class="form-grid">
         <div class="form-field full"><label>Consultation</label>
@@ -118,41 +154,71 @@ HMD.pages = HMD.pages || {};
           </select>
           <span class="field-error">Consultation is required.</span>
         </div>
-        <div class="form-field"><label>Medicine</label>
-          <select class="select-field" id="f-medicineId" required>
-            <option value="">Select medicine…</option>
-            ${medicinesCache.map((m) => `<option value="${m.id}" ${String(m.id) === String(medicineId) ? 'selected' : ''}>${escapeHtml(medicineLabel(m))}</option>`).join('')}
-          </select>
-          <span class="field-error">Medicine is required.</span>
+        <div class="form-field"><label>Prescription Date</label>
+          <input type="date" class="input-field" id="f-prescriptionDate" value="${p.prescriptionDate ? String(p.prescriptionDate).slice(0, 10) : ''}" required />
+          <span class="field-error">Prescription date is required.</span>
         </div>
-        <div class="form-field"><label>Test (optional)</label>
-          <select class="select-field" id="f-testId">
-            <option value="">None</option>
-            ${testsCache.map((t) => `<option value="${t.id}" ${String(t.id) === String(testId) ? 'selected' : ''}>${escapeHtml(testLabel(t))}</option>`).join('')}
+        <div class="form-field full"><label>Dosage / Instructions</label>
+          <textarea class="input-field" id="f-dosage" rows="3" required>${escapeHtml(p.dosage || '')}</textarea>
+          <span class="field-error">Dosage or instructions are required.</span>
+        </div>
+        <div class="form-field full"><label>Medicines</label>
+          <select class="select-field" id="f-medicineIds" multiple size="5">
+            ${medicinesCache.map((m) => `<option value="${m.id}" ${medicineIds.has(String(m.id)) ? 'selected' : ''}>${escapeHtml(medicineLabel(m))}</option>`).join('')}
           </select>
         </div>
-        <div class="form-field full"><label>Notes</label>
-          <textarea class="input-field" id="f-notes" rows="3">${escapeHtml(p.notes || p.instructions || '')}</textarea>
+        <div class="form-field full"><label>Tests</label>
+          <select class="select-field" id="f-testIds" multiple size="5">
+            ${testsCache.map((t) => `<option value="${t.id}" ${testIds.has(String(t.id)) ? 'selected' : ''}>${escapeHtml(testLabel(t))}</option>`).join('')}
+          </select>
         </div>
       </div>
     `;
   }
 
+  function selectedValues(id) {
+    return Array.from(document.getElementById(id).selectedOptions).map((option) => option.value);
+  }
+
   function readForm() {
     return {
       consultationId: document.getElementById('f-consultationId').value,
-      medicineId: document.getElementById('f-medicineId').value,
-      testId: document.getElementById('f-testId').value || null,
-      notes: document.getElementById('f-notes').value.trim(),
+      prescriptionDate: document.getElementById('f-prescriptionDate').value,
+      dosage: document.getElementById('f-dosage').value.trim(),
+      medicineIds: selectedValues('f-medicineIds'),
+      testIds: selectedValues('f-testIds'),
     };
   }
 
   function validate(body) {
     const errors = [];
     if (!body.consultationId) errors.push('f-consultationId');
-    if (!body.medicineId) errors.push('f-medicineId');
+    if (!body.prescriptionDate) errors.push('f-prescriptionDate');
+    if (!body.dosage) errors.push('f-dosage');
     errors.forEach((id) => document.getElementById(id).closest('.form-field').classList.add('has-error'));
     return errors.length === 0;
+  }
+
+  async function deleteMedicineLink(prescriptionId, medicineId) {
+    await HMD_API.del(`/api/prescription-medicines?prescriptionId=${encodeURIComponent(prescriptionId)}&medicineId=${encodeURIComponent(medicineId)}`);
+  }
+
+  async function deleteTestLink(prescriptionId, testId) {
+    await HMD_API.del(`/api/prescription-tests?prescriptionId=${encodeURIComponent(prescriptionId)}&testId=${encodeURIComponent(testId)}`);
+  }
+
+  async function syncLinks(prescriptionId, medicineIds, testIds, oldMedicineIds, oldTestIds) {
+    const selectedMedicines = new Set(medicineIds.map(String));
+    const selectedTests = new Set(testIds.map(String));
+    const oldMedicines = new Set(oldMedicineIds.map(String));
+    const oldTests = new Set(oldTestIds.map(String));
+
+    await Promise.all(Array.from(oldMedicines).filter((id) => !selectedMedicines.has(id)).map((id) => deleteMedicineLink(prescriptionId, id)));
+    await Promise.all(Array.from(oldTests).filter((id) => !selectedTests.has(id)).map((id) => deleteTestLink(prescriptionId, id)));
+    await Promise.all(Array.from(selectedMedicines).filter((id) => !oldMedicines.has(id)).map((id) =>
+      HMD_API.post('/api/prescription-medicines', { prescription_id: prescriptionId, medicine_id: Number(id) })));
+    await Promise.all(Array.from(selectedTests).filter((id) => !oldTests.has(id)).map((id) =>
+      HMD_API.post('/api/prescription-tests', { prescription_id: prescriptionId, test_id: Number(id) })));
   }
 
   function openForm(existing) {
@@ -174,13 +240,27 @@ HMD.pages = HMD.pages || {};
           btn.disabled = true;
           btn.textContent = 'Saving…';
           try {
+            const oldMedicineIds = isEdit ? linkedMedicineIds(existing.prescriptionId) : [];
+            const oldTestIds = isEdit ? linkedTestIds(existing.prescriptionId) : [];
+            let prescriptionId;
             if (isEdit) {
-              await HMD_API.put(`/api/prescriptions/${existing.id}`, body);
-              showToast('Prescription updated.', 'success');
+              prescriptionId = existing.prescriptionId;
+              await HMD_API.put(`/api/prescriptions/${prescriptionId}`, {
+                consultationId: body.consultationId,
+                prescriptionDate: body.prescriptionDate,
+                dosage: body.dosage,
+              });
             } else {
-              await HMD_API.post('/api/prescriptions', body);
-              showToast('Prescription added.', 'success');
+              const created = await HMD_API.post('/api/prescriptions', {
+                consultationId: body.consultationId,
+                prescriptionDate: body.prescriptionDate,
+                dosage: body.dosage,
+              });
+              prescriptionId = created?.prescriptionId;
+              if (!prescriptionId) throw new Error('Prescription was created but no prescription ID was returned.');
             }
+            await syncLinks(prescriptionId, body.medicineIds, body.testIds, oldMedicineIds, oldTestIds);
+            showToast(isEdit ? 'Prescription updated.' : 'Prescription added.', 'success');
             HMD_MODAL.close();
             load();
           } catch (err) {
@@ -196,7 +276,7 @@ HMD.pages = HMD.pages || {};
   function remove(id) {
     confirmDialog({
       title: 'Delete prescription?',
-      message: `This will permanently remove prescription #${id}. This cannot be undone.`,
+      message: `This will permanently remove prescription #${id} and its medicine/test links. This cannot be undone.`,
       onConfirm: async () => {
         await HMD_API.del(`/api/prescriptions/${id}`);
         showToast('Prescription deleted.', 'success');
@@ -207,7 +287,7 @@ HMD.pages = HMD.pages || {};
 
   document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('addPrescriptionBtn').addEventListener('click', async () => {
-      if (!consultationsCache.length) await loadLookups();
+      if (!consultationsCache.length || !medicinesCache.length || !testsCache.length) await loadLookups();
       openForm(null);
     });
     document.querySelector('[data-retry="prescriptions"]').addEventListener('click', load);

@@ -1,9 +1,3 @@
-/**
- * pages/hospitals.js
- * -----------------------------------------------------------------------
- * Hospitals table + Add/Edit/Delete, backed by /api/hospitals.
- */
-
 const HMD = window.HMD || (window.HMD = {});
 HMD.pages = HMD.pages || {};
 
@@ -15,7 +9,7 @@ HMD.pages = HMD.pages || {};
     setTableState('hospitals', 'loading');
     try {
       const data = await HMD_API.get('/api/hospitals');
-      allHospitals = Array.isArray(data) ? data : [];
+      allHospitals = (Array.isArray(data) ? data : []).map((h) => ({ ...h, id: h.hospitalId }));
       render();
     } catch (err) {
       setTableState('hospitals', 'error');
@@ -27,7 +21,7 @@ HMD.pages = HMD.pages || {};
     let rows = allHospitals;
     if (currentSearch) {
       rows = rows.filter((h) =>
-        (h.name || '').toLowerCase().includes(currentSearch) ||
+        (h.hospitalName || '').toLowerCase().includes(currentSearch) ||
         (h.city || '').toLowerCase().includes(currentSearch));
     }
 
@@ -41,7 +35,7 @@ HMD.pages = HMD.pages || {};
     tbody.innerHTML = rows.map((h) => `
       <tr>
         <td>#${escapeHtml(h.id)}</td>
-        <td>${escapeHtml(h.name || '—')}</td>
+        <td>${escapeHtml(h.hospitalName || '—')}</td>
         <td>${escapeHtml(h.street || '—')}</td>
         <td>${escapeHtml(h.area || '—')}</td>
         <td>${escapeHtml(h.city || '—')}</td>
@@ -55,6 +49,7 @@ HMD.pages = HMD.pages || {};
       </tr>
     `).join('');
     setTableState('hospitals', 'ready');
+    if (window.lucide) lucide.createIcons();
 
     tbody.querySelectorAll('[data-edit]').forEach((btn) =>
       btn.addEventListener('click', () => openForm(allHospitals.find((h) => String(h.id) === btn.dataset.edit))));
@@ -71,7 +66,7 @@ HMD.pages = HMD.pages || {};
     return `
       <div class="form-grid">
         <div class="form-field full"><label>Hospital Name</label>
-          <input class="input-field" id="f-name" value="${escapeHtml(h.name || '')}" required />
+          <input class="input-field" id="f-hospitalName" value="${escapeHtml(h.hospitalName || '')}" required />
           <span class="field-error">Name is required.</span>
         </div>
         <div class="form-field full"><label>Street</label>
@@ -81,7 +76,8 @@ HMD.pages = HMD.pages || {};
           <input class="input-field" id="f-area" value="${escapeHtml(h.area || '')}" />
         </div>
         <div class="form-field"><label>City</label>
-          <input class="input-field" id="f-city" value="${escapeHtml(h.city || '')}" />
+          <input class="input-field" id="f-city" value="${escapeHtml(h.city || '')}" required />
+          <span class="field-error">City is required.</span>
         </div>
         <div class="form-field"><label>Pincode</label>
           <input class="input-field" id="f-pincode" value="${escapeHtml(h.pincode || '')}" />
@@ -92,7 +88,7 @@ HMD.pages = HMD.pages || {};
 
   function readForm() {
     return {
-      name: document.getElementById('f-name').value.trim(),
+      hospitalName: document.getElementById('f-hospitalName').value.trim(),
       street: document.getElementById('f-street').value.trim(),
       area: document.getElementById('f-area').value.trim(),
       city: document.getElementById('f-city').value.trim(),
@@ -102,7 +98,8 @@ HMD.pages = HMD.pages || {};
 
   function validate(body) {
     const errors = [];
-    if (!body.name) errors.push('f-name');
+    if (!body.hospitalName) errors.push('f-hospitalName');
+    if (!body.city) errors.push('f-city');
     errors.forEach((id) => document.getElementById(id).closest('.form-field').classList.add('has-error'));
     return errors.length === 0;
   }
@@ -127,7 +124,7 @@ HMD.pages = HMD.pages || {};
           btn.textContent = 'Saving…';
           try {
             if (isEdit) {
-              await HMD_API.put(`/api/hospitals/${existing.id}`, body);
+              await HMD_API.put(`/api/hospitals/${existing.hospitalId}`, body);
               showToast('Hospital updated.', 'success');
             } else {
               await HMD_API.post('/api/hospitals', body);

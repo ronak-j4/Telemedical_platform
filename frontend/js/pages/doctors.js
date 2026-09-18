@@ -1,13 +1,3 @@
-/**
- * pages/doctors.js
- * -----------------------------------------------------------------------
- * Doctors table + Add/Edit/Delete, backed by /api/doctors. Specialization
- * options are loaded dynamically — first from a dedicated
- * /api/specializations endpoint if the backend exposes one, otherwise
- * derived from the specializations already present on loaded doctors.
- * Nothing here is a hardcoded list of specializations.
- */
-
 const HMD = window.HMD || (window.HMD = {});
 HMD.pages = HMD.pages || {};
 
@@ -18,16 +8,16 @@ HMD.pages = HMD.pages || {};
   let currentSearch = '';
 
   async function loadSpecializations() {
-    try {
-      const data = await HMD_API.get('/api/specializations');
-      if (Array.isArray(data) && data.length) {
-        specializations = data.map((s) => (typeof s === 'string' ? s : (s.name || s.specialization || String(s.id))));
-        return;
-      }
-    } catch (_) {
-      // Endpoint may not exist — fall back to deriving from doctor records below.
-    }
-    specializations = [...new Set(allDoctors.map((d) => d.specialization).filter(Boolean))];
+    const data = await HMD_API.get('/api/doctor-specializations').catch(() => []);
+    const rows = Array.isArray(data) ? data : [];
+    const byDoctor = {};
+    rows.forEach((row) => {
+      const doctorId = row.doctor_id ?? row.DOCTOR_ID;
+      const specialization = row.specialization ?? row.SPECIALIZATION;
+      if (doctorId != null && specialization) byDoctor[doctorId] = specialization;
+    });
+    allDoctors = allDoctors.map((d) => ({ ...d, id: d.doctorId, specialization: byDoctor[d.doctorId] || '' }));
+    specializations = [...new Set(Object.values(byDoctor).filter(Boolean))];
   }
 
   function populateSpecializationOptions() {
@@ -42,7 +32,7 @@ HMD.pages = HMD.pages || {};
     setTableState('doctors', 'loading');
     try {
       const data = await HMD_API.get('/api/doctors');
-      allDoctors = Array.isArray(data) ? data : [];
+      allDoctors = (Array.isArray(data) ? data : []).map((d) => ({ ...d, id: d.doctorId }));
       await loadSpecializations();
       populateSpecializationOptions();
       render();
@@ -71,7 +61,7 @@ HMD.pages = HMD.pages || {};
         <td>${escapeHtml(d.gender || '—')}</td>
         <td>${formatDate(d.dob)}</td>
         <td>${formatDate(d.dateJoined || d.joinDate)}</td>
-        <td>${escapeHtml(d.licenseNo || d.licenseNumber || '—')}</td>
+        <td>${escapeHtml(d.licenseNumber || '—')}</td>
         <td>${d.experience !== undefined && d.experience !== null ? escapeHtml(d.experience) + ' yrs' : '—'}</td>
         <td>${escapeHtml(d.specialization || '—')}</td>
         <td class="col-actions">
@@ -83,6 +73,7 @@ HMD.pages = HMD.pages || {};
       </tr>
     `).join('');
     setTableState('doctors', 'ready');
+    if (window.lucide) lucide.createIcons();
 
     tbody.querySelectorAll('[data-edit]').forEach((btn) =>
       btn.addEventListener('click', () => openForm(allDoctors.find((d) => String(d.id) === btn.dataset.edit))));
@@ -96,15 +87,12 @@ HMD.pages = HMD.pages || {};
   }
 
   function specializationFieldHtml(d) {
-    if (specializations.length) {
-      return `
-        <select class="select-field" id="f-specialization">
-          <option value="">Select…</option>
-          ${specializations.map((s) => `<option value="${escapeHtml(s)}" ${d.specialization === s ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('')}
-        </select>
-      `;
-    }
-    return `<input class="input-field" id="f-specialization" value="${escapeHtml(d.specialization || '')}" placeholder="e.g. Cardiology" />`;
+    return `
+      <select class="select-field" id="f-specialization">
+        <option value="">Select…</option>
+        ${specializations.map((s) => `<option value="${escapeHtml(s)}" ${d.specialization === s ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('')}
+      </select>
+    `;
   }
 
   function formFieldsHtml(d = {}) {
@@ -133,7 +121,7 @@ HMD.pages = HMD.pages || {};
           <input type="date" class="input-field" id="f-dateJoined" value="${d.dateJoined ? String(d.dateJoined).slice(0, 10) : ''}" />
         </div>
         <div class="form-field"><label>License No</label>
-          <input class="input-field" id="f-licenseNo" value="${escapeHtml(d.licenseNo || d.licenseNumber || '')}" />
+          <input class="input-field" id="f-licenseNumber" value="${escapeHtml(d.licenseNumber || '')}" />
         </div>
         <div class="form-field"><label>Experience (years)</label>
           <input type="number" min="0" class="input-field" id="f-experience" value="${d.experience ?? ''}" />
@@ -153,9 +141,9 @@ HMD.pages = HMD.pages || {};
       dob: document.getElementById('f-dob').value,
       gender: document.getElementById('f-gender').value,
       dateJoined: document.getElementById('f-dateJoined').value,
-      licenseNo: document.getElementById('f-licenseNo').value.trim(),
+      licenseNumber: document.getElementById('f-licenseNumber').value.trim(),
       experience: document.getElementById('f-experience').value ? Number(document.getElementById('f-experience').value) : null,
-      specialization: document.getElementById('f-specialization').value.trim(),
+      specialization: document.getElementById('f-specialization').value,
     };
   }
 
@@ -166,6 +154,15 @@ HMD.pages = HMD.pages || {};
     if (!body.specialization) errors.push('f-specialization');
     errors.forEach((id) => document.getElementById(id).closest('.form-field').classList.add('has-error'));
     return errors.length === 0;
+  }
+
+  async function syncSpecialization(doctorId, oldSpecialization, newSpecialization) {
+    if (oldSpecialization && oldSpecialization !== newSpecialization) {
+      await HMD_API.del(`/api/doctor-specializations?doctorId=${encodeURIComponent(doctorId)}&specialization=${encodeURIComponent(oldSpecialization)}`);
+    }
+    if (newSpecialization && oldSpecialization !== newSpecialization) {
+      await HMD_API.post('/api/doctor-specializations', { doctor_id: doctorId, specialization: newSpecialization });
+    }
   }
 
   function openForm(existing) {
@@ -187,11 +184,17 @@ HMD.pages = HMD.pages || {};
           btn.disabled = true;
           btn.textContent = 'Saving…';
           try {
+            const doctorBody = { ...body };
+            delete doctorBody.specialization;
             if (isEdit) {
-              await HMD_API.put(`/api/doctors/${existing.id}`, body);
+              await HMD_API.put(`/api/doctors/${existing.doctorId}`, doctorBody);
+              await syncSpecialization(existing.doctorId, existing.specialization, body.specialization);
               showToast('Doctor updated.', 'success');
             } else {
-              await HMD_API.post('/api/doctors', body);
+              const created = await HMD_API.post('/api/doctors', doctorBody);
+              if (created?.doctorId) {
+                await HMD_API.post('/api/doctor-specializations', { doctor_id: created.doctorId, specialization: body.specialization });
+              }
               showToast('Doctor added.', 'success');
             }
             HMD_MODAL.close();

@@ -31,8 +31,8 @@ HMD.pages = HMD.pages || {};
       HMD_API.get('/api/patients').catch(() => []),
       HMD_API.get('/api/doctors').catch(() => []),
     ]);
-    patientsCache = Array.isArray(patients) ? patients : [];
-    doctorsCache = Array.isArray(doctors) ? doctors : [];
+    patientsCache = (Array.isArray(patients) ? patients : []).map((p) => ({ ...p, id: p.patientId }));
+    doctorsCache = (Array.isArray(doctors) ? doctors : []).map((d) => ({ ...d, id: d.doctorId }));
   }
 
   function populateStatusFilter() {
@@ -48,7 +48,7 @@ HMD.pages = HMD.pages || {};
     setTableState('consultations', 'loading');
     try {
       const [data] = await Promise.all([HMD_API.get('/api/consultations'), loadLookups()]);
-      allConsultations = Array.isArray(data) ? data : [];
+      allConsultations = (Array.isArray(data) ? data : []).map((c) => ({ ...c, id: c.consultationId }));
       populateStatusFilter();
       render();
     } catch (err) {

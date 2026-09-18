@@ -18,7 +18,7 @@ HMD.pages = HMD.pages || {};
     setTableState('tests', 'loading');
     try {
       const data = await HMD_API.get('/api/tests');
-      allTests = Array.isArray(data) ? data : [];
+      allTests = (Array.isArray(data) ? data : []).map((row) => ({ ...row, id: row.testId }));
       render();
     } catch (err) {
       setTableState('tests', 'error');

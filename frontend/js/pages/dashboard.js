@@ -134,7 +134,7 @@ HMD.pages = HMD.pages || {};
 
     HMD_API.get('/api/dashboard/payment-summary')
       .then((rows) => {
-        const data = normalizePairs(rows, ['method', 'label', 'name'], ['total', 'amount', 'count', 'value']);
+        const data = normalizePairs(rows, ['paid_by', 'PAID_BY', 'method', 'label', 'name'], ['total_amount', 'TOTAL_AMOUNT', 'total_payments', 'TOTAL_PAYMENTS', 'amount', 'count', 'value']);
         renderChart('chartPayments', 'emptyPayments', 'bar', data, { label: 'Amount' });
       })
       .catch(() => renderChart('chartPayments', 'emptyPayments', 'bar', { labels: [], values: [] }));

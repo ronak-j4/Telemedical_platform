@@ -17,6 +17,7 @@ Run the files in this exact order while connected to the target Oracle schema:
 4. `04_seed_data.sql` — inserts demonstration data and commits it.
 5. `05_queries.sql` — runs predefined academic SELECT statements.
 6. `06_plsql.sql` — compiles three demonstration procedures.
+7. `07_sequences.sql` — creates the sequences used by the Spring Boot backend for new primary-key values.
 
 In SQL*Plus, from this directory, use:
 
@@ -27,6 +28,7 @@ In SQL*Plus, from this directory, use:
 @04_seed_data.sql
 @05_queries.sql
 @06_plsql.sql
+@07_sequences.sql
 ```
 
 For output from `show_patient_consultations`, run `SET SERVEROUTPUT ON` before calling it.
